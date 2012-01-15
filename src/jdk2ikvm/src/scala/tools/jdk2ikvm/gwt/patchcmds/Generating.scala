@@ -626,7 +626,27 @@ trait Generating extends Patching { this : Plugin =>
     }
 
   }
-  
+
+  /** Removes references to java.lang.ThreadLocal */
+  private [Generating] class CleanupFlatHashTable(patchtree: PatchTree) extends CallsiteUtils(patchtree) {
+    private val moduleClass = definitions.getRequiredModule("scala.collection.mutable.FlatHashTable").moduleClass
+
+    private val clazz = definitions.getRequiredClass("scala.collection.mutable.FlatHashTable")
+
+    def collectPatches(tree: Tree) {
+      enclosingClass(moduleClass)(tree) {
+        case x: DefDef if x.name.toString == "seedGenerator" =>
+          val range = x.rhs.pos.asInstanceOf[RangePosition]
+          patchtree.replace(range.start, range.end, "new util.Random")
+      }
+      enclosingClass(clazz)(tree) {
+        case x: DefDef if x.name.toString == "randomSeed" =>
+          val range = x.rhs.pos.asInstanceOf[RangePosition]
+          patchtree.replace(range.start, range.end, "seedGenerator.nextInt()")
+      }
+    }
+  }
+
   /* ------------------------ The main patcher ------------------------ */
 
   class RephrasingTraverser(patchtree: PatchTree) extends Traverser {
@@ -657,6 +677,8 @@ trait Generating extends Patching { this : Plugin =>
     
     private lazy val removeCloneMethod = new RemoveCloneMethod(patchtree)
 
+    private lazy val cleanupFlatHashTable = new CleanupFlatHashTable(patchtree)
+
     override def traverse(tree: Tree): Unit = {
       
       removeParallelCollections collectPatches tree
@@ -685,6 +707,8 @@ trait Generating extends Patching { this : Plugin =>
       
       removeCloneMethod collectPatches tree
       
+      cleanupFlatHashTable collectPatches tree
+
       super.traverse(tree) // "longest patches first" that's why super.traverse after collectPatches(tree).
     }
 
